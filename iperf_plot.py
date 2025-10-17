@@ -1,59 +1,47 @@
 # iperf_plot.py
-# Reads iperf_tcp_*.csv and iperf_udp_*.csv and saves:
-#   tcp_vs_distance.png
-#   udp_vs_distance.png
+# Generates 5 graphs (2m, 5m, 8m, 10m, 12m) showing TCP & UDP throughput across Run1–Run5
 
-import glob
 import pandas as pd
 import matplotlib.pyplot as plt
+import glob, re, os
 
-def load_tcp():
-    paths = sorted(glob.glob("iperf_tcp_*m.csv"))
-    if not paths:
-        return pd.DataFrame(columns=["Distance","Avg"])
-    frames = []
-    for p in paths:
-        df = pd.read_csv(p)
-        df.columns = [c.strip() for c in df.columns]
-        frames.append(df[["Distance","Avg"]])
-    out = pd.concat(frames, ignore_index=True)
-    out["Distance"] = pd.to_numeric(out["Distance"], errors="coerce")
-    out["Avg"] = pd.to_numeric(out["Avg"], errors="coerce")
-    return out.dropna().sort_values("Distance")
+def read_runs(file):
+    """Reads the single data line and splits the space-separated runs."""
+    with open(file, "r") as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
+    if len(lines) < 2:
+        raise ValueError(f"No data rows in {file}")
+    # second line has 'distance, runs_blob, avg'
+    parts = [p.strip() for p in lines[1].split(",")]
+    distance = int(float(parts[0]))
+    runs_blob = parts[1]
+    runs = [float(x) for x in runs_blob.split() if x]
+    return distance, runs
 
-def load_udp():
-    paths = sorted(glob.glob("iperf_udp_*m.csv"))
-    if not paths:
-        return pd.DataFrame(columns=["Distance","Avg"])
-    frames = []
-    for p in paths:
-        df = pd.read_csv(p)
-        df.columns = [c.strip() for c in df.columns]
-        frames.append(df[["Distance","Avg"]])
-    out = pd.concat(frames, ignore_index=True)
-    out["Distance"] = pd.to_numeric(out["Distance"], errors="coerce")
-    out["Avg"] = pd.to_numeric(out["Avg"], errors="coerce")
-    return out.dropna().sort_values("Distance")
+tcp_files = sorted(glob.glob("iperf_tcp_*m.csv"))
 
-def plot_simple(df, title, ylabel, outfile):
-    if df.empty:
-        print(f"Skipping {outfile} (no data).")
-        return
+for tcp in tcp_files:
+    dist = re.search(r"iperf_tcp_(\d+)m\.csv", tcp).group(1)
+    udp = f"iperf_udp_{dist}m.csv"
+    if not os.path.exists(udp):
+        print(f"Skipping {dist}m — missing {udp}")
+        continue
+
+    tcp_dist, tcp_runs = read_runs(tcp)
+    udp_dist, udp_runs = read_runs(udp)
+
+    runs_labels = [f"Run{i}" for i in range(1, len(tcp_runs) + 1)]
     plt.figure()
-    plt.plot(df["Distance"], df["Avg"], marker="o")
-    plt.xlabel("Distance (m)")
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.grid(True, alpha=0.3)
-    plt.savefig(outfile, dpi=180, bbox_inches="tight")
-    plt.close()
-    print(f"Saved {outfile}")
-
-def main():
-    df_tcp = load_tcp()
-    df_udp = load_udp()
-    plot_simple(df_tcp, "TCP Throughput vs Distance", "Throughput (Mbps)", "tcp_vs_distance.png")
-    plot_simple(df_udp, "UDP Throughput vs Distance", "Throughput (Mbps)", "udp_vs_distance.png")
-
-if __name__ == "__main__":
-    main()
+    plt.plot(runs_labels, tcp_runs, marker="o", color="orange",
+             label="TCP Throughput (Mbps)")
+    plt.plot(runs_labels, udp_runs, marker="s", linestyle="--", color="brown",
+             label="UDP Throughput (Mbps)")
+    plt.title(f"TCP & UDP Throughput at {dist} m Distance")
+    plt.xlabel("Test Runs")
+    plt.ylabel("Throughput (Mbps)")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"throughput_{dist}m.png", dpi=200)
+    plt.show()
+    print(f"Saved throughput_{dist}m.png")
